@@ -16,7 +16,6 @@
 
 > easy, automatic, optimized dll config handler for webpack
 
-ℹ️️ pass in any existing webpack config, get it decorated with dll-reference-plugin and (only when needed) a whole dll-plugin-only config prepended!
 
 ## 📦 install
 ```bash
@@ -34,10 +33,11 @@ npm i d-l-l --save-dev
 
 ## 👋 intro
 
-Using Webpack [DLL Plugins](https://robertknight.github.io/posts/webpack-dll-plugins/ "Dynamically Linked Library") can have a [drastic build time boost][docs-ss]. It allows creating separate bundles for files & dependencies that do not change often.
+Webpack's [Dll and DllReference plugins][docs-resources] are a way to split a large JavaScript project into multiple bundles which can be compiled independently. They can be used to [optimize build times][docs-ss] (both full and incremental) and improve caching for users by putting code which changes infrequently into separate "library" bundles. [- Robert Knight](https://robertknight.github.io/posts/webpack-dll-plugins/ "Dynamically Linked Library")
 
-Unfortunately, it comes with some problems.
-Thankfully, this package aims to provide solutions for them.
+Unfortunately, the DLL plugins come with some problems. 
+
+ℹ️️ This package aims to provide solutions for them by allowing you to pass in any existing webpack config, then get it back decorated with dll-reference-plugins and ([only when needed][docs-how]) a whole dll-plugin-only config prepended!
 
 
 ### ❎ problems with dll plugin:
