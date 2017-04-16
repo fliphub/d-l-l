@@ -1,0 +1,34 @@
+{
+  "name": "d-l-l-example",
+  "version": "0.0.1",
+  "description": "example for d-l-l",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "npm run build && npm run exec",
+    "exec": "node exec",
+    "build": "webpack --config webpack.config.js"
+  },
+  "todoDependencies": {
+    "d-l-l": "*"
+  },
+  "dependencies": {
+    "deepmerge": "^1.3.2",
+    "flipchain": "^0.4.2",
+    "fliphash": "0.0.1",
+    "kind-of": "^3.1.0",
+    "lodash": "^4.17.4"
+  },
+  "devDependencies": {
+    "webpack": "^2.3.3"
+  },
+  "license": "MIT",
+  "author": "James <aretecode@gmail.com>",
+  "homepage": "https://github.com/fliphub/d-l-l#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fliphub/d-l-l.git"
+  },
+  "bugs": {
+    "url": "https://github.com/fliphub/d-l-l/issues"
+  }
+}

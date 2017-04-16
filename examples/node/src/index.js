@@ -1,0 +1,5 @@
+const lodash = require('./lodashed')
+const kindOf = require('kind-of')
+const flipchain = require('flipchain')
+console.log('lodash - index', lodash)
+console.log('kindof(flipchain)', kindOf(flipchain))
