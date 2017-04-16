@@ -16,6 +16,8 @@
 
 > easy, automatic, optimized dll config handler for webpack
 
+pass in any existing webpack config, get it decorated with dll-reference-plugin and (only when needed) a whole dll-plugin-only!
+
 ## 📦 install
 ```bash
 yarn add d-l-l --dev
