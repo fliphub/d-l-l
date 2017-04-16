@@ -16,7 +16,7 @@
 
 > easy, automatic, optimized dll config handler for webpack
 
-pass in any existing webpack config, get it decorated with dll-reference-plugin and (only when needed) a whole dll-plugin-only!
+ℹ️️ pass in any existing webpack config, get it decorated with dll-reference-plugin and (only when needed) a whole dll-plugin-only config prepended!
 
 ## 📦 install
 ```bash
