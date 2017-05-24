@@ -1,10 +1,4 @@
 {
-  "fliplog": {
-    "use": [
-      "cli"
-    ],
-    "debug": false
-  },
   "name": "d-l-l",
   "version": "0.1.0",
   "description": "easy, automatic, optimized dll config handler for webpack",
@@ -37,7 +31,7 @@
     "flipcache": "*",
     "flipfile": "0.0.12",
     "fliphash": "0.0.1",
-    "fliplog": "^0.2.7",
+    "fliplog": "^0.3.0",
     "globby": "^6.1.0"
   },
   "devDependencies": {
