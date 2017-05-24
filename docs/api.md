@@ -7,6 +7,24 @@
 - `configs` instance of `DLL` with configs to export
 
 
+# 🗝️
+- [dir](#dir)
+- [config](#config)
+- [find](#find)
+- [pkgDeps](#)
+- [lastModifiedFilter](#)
+- [debug](#)
+- [toConfig](#)
+- [staleTime](#)
+- [everyX](#)
+- [og](#)
+- [cacheBustingFiles](#cacheBustingFiles)
+- [context](#context)
+- [shouldBeUsed](#shouldBeUsed)
+- [clearCache](#clearCache)
+- [auto (static)](#auto)
+- [configs (static)](#configs)
+
 
 ## `dir`
 
