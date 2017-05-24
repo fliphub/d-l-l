@@ -29,13 +29,14 @@ npm i d-l-l --save-dev
 #### [🌐 full api](https://github.com/fliphub/d-l-l/wiki/%F0%9F%8C%90-api)
 #### [⚙ advanced config examples][docs-config]
 #### [🔗 read more webpack dll plugins][docs-resources]
+## [🔬 tests](./test)
 
 
 ## 👋 intro
 
 Webpack's [Dll and DllReference plugins][docs-resources] are a way to split a large JavaScript project into multiple bundles which can be compiled independently. They can be used to [optimize build times][docs-ss] (both full and incremental) and improve caching for users by putting code which changes infrequently into separate "library" bundles. [- Robert Knight](https://robertknight.github.io/posts/webpack-dll-plugins/ "Dynamically Linked Library")
 
-Unfortunately, the DLL plugins come with some problems. 
+Unfortunately, the DLL plugins come with some problems.
 
 ℹ️️ This package aims to provide solutions for them by allowing you to pass in any existing webpack config, then get it back decorated with dll-reference-plugins and ([only when needed][docs-how]) a whole dll-plugin-only config prepended!
 
@@ -82,8 +83,25 @@ _✚ = (dll config will be prepended)_
 
 [see the src code][src-shouldBuildDLL]
 
+## 📖 usage - custom
 
-## 📖 usage
+```js
+// webpack.config.js
+const DLL = require('d-l-l')
+
+const dll = new DLL()
+const configs = dll
+  .dir(__dirname)
+  .config(config)
+  // (dependencies, dev, all)
+  .pkgDeps(deps => deps.filter(dep => !/lodash/.test(dep)))
+  .toConfig()
+
+module.exports = configs
+```
+
+
+## 👾 easy full auto usage
 
 ```js
 // webpack.config.js
@@ -94,6 +112,7 @@ const configs = dll
   .dir(__dirname)
   .config(config)
   .find()
+  // defaults to bundledDependencies, fallback to dependencies
   .pkgDeps()
   .toConfig()
 
