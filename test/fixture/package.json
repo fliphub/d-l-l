@@ -1,0 +1,12 @@
+{
+  "bundledDependencies": {
+    "chain-able": "*"
+  },
+  "dependencies": {
+    "chain-able": "*",
+    "flipfile": "*"
+  },
+  "devDependencies": {
+    "webpack": "*"
+  }
+}
