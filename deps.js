@@ -1,8 +1,9 @@
 const log = require('fliplog')
 const fliptime = require('fliptime')
 
+// log.quick(log.pkg)
 // time diffs, caching
-const {tillNow, tillNowSatisfies} = fliptime
+const { tillNow, tillNowSatisfies } = fliptime
 
 // simple unique array filter fn
 function uniq(value, index, arr) {
@@ -15,7 +16,7 @@ function uniq(value, index, arr) {
  */
 function lastModified(ago) {
   const cb = mtime => tillNowSatisfies(mtime, ago)
-  return ({mtime}) => {
+  return ({ mtime }) => {
     if (cb(mtime)) return false
     return true
   }

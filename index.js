@@ -1,18 +1,11 @@
-const {resolve, basename} = require('path')
-const {DllReferencePlugin, DllPlugin} = require('webpack')
-const ChainedMap = require('flipchain/ChainedMapExtendable')
+const { resolve, basename, dirname } = require('path')
+const { DllReferencePlugin, DllPlugin } = require('webpack')
+const { ChainedMapExtendable, dopemerge } = require('chain-able')
+const { isRel, isAbs, write, exists } = require('flipfile')
+const { tillNowSatisfies, uniq, lastModified, flatten, log } = require('./deps')
+const timer = require('fliptime')
 const flipcache = require('flipcache')
 const fliphash = require('fliphash')
-const {isRel, write, exists} = require('flipfile')
-const timer = require('fliptime')
-const deepmerge = require('deepmerge')
-const {
-  tillNowSatisfies,
-  uniq,
-  lastModified,
-  flatten,
-  log,
-} = require('./deps')
 
 let cache
 let hashcache
@@ -35,7 +28,7 @@ function saveModified(file) {
   const keyRecord = key + '.record'
 
   // if not set
-  if (cache.has(key) === false) cache.set(key, {record: [], meta: {}})
+  if (cache.has(key) === false) cache.set(key, { record: [], meta: {} })
 
   // add uniq records
   const record = cache.get(keyRecord)
@@ -45,6 +38,10 @@ function saveModified(file) {
 }
 
 /**
+ * @TODO
+ * - [ ] configure lib name & target etc
+ *
+ * @classdesc
  * internally choose whether to make it an array and add dll plugin first
  * if there is no bundle built, then only export dll plugin
  * then run the build command again
@@ -54,12 +51,12 @@ function saveModified(file) {
  * export both
  * and store the manifests
  */
-class DLL extends ChainedMap {
+class DLL extends ChainedMapExtendable {
   // --- setup ---
 
   /**
    * @param {any} parent
-   * @return {DLL}
+   * @return {DLL} @chainable
    */
   static init(parent) {
     return new DLL(parent)
@@ -73,29 +70,27 @@ class DLL extends ChainedMap {
 
     timer.start('dll')
 
-    this
-      .extend([
-        'og',
-        'files',
-        'deps',
-        'refs',
-        'dlls',
-        'context',
-        'pkg',
-        'staleTime',
-        'everyX',
-        'shouldBeUsed',
-      ])
+    this.extend([
+      'og',
+      'files',
+      'deps',
+      'refs',
+      'dlls',
+      'context',
+      'pkg',
+      'staleTime',
+      'everyX',
+      'shouldBeUsed',
+    ])
       .og(false)
-      .debug(false)
       .files([])
       .deps([])
       .refs([])
       .dlls([])
       .output('output')
       .context('.')
-      .lastModifiedFilter({hours: 2})
-      .staleTime({days: 1})
+      .lastModifiedFilter({ hours: 2 })
+      .staleTime({ days: 1 })
       .everyX(33)
 
     // this.files = new ChainedSet(this)
@@ -110,37 +105,46 @@ class DLL extends ChainedMap {
    *       default to 1 which means single arr entry
    *
    * @param {string} [findGlob=string]
-   * @return {DLL}
+   * @param {Function} [filter=null]
+   * @return {DLL} @chainable
    */
-  find(findGlob = 'src/**/*.+(js|jsx|ts|tsx)') {
-    const glob = require('flipfile/glob')
+  find(findGlob = null, filter = null) {
+    const glob = require('globby')
 
     if (findGlob) this.set('srcGlob', findGlob)
 
-    const {srcGlob, lastModifiedFilter, dir} = this.entries()
+    const { srcGlob, lastModifiedFilter, dir } = this.entries()
+    const { lstatSync } = require('fs')
+
+    log.green('glob:').fmtobj(srcGlob).echo(this.get('debug') || true)
 
     // call the glob
-    const g = new glob.GlobSync(srcGlob, {stat: true, absolute: true})
+    const g = new glob.sync(srcGlob, { absolute: true, cwd: __dirname })
 
     // filter results using stats
-    const files = g
-      .found
-      .filter(abs => {
-        // put as an object for use in saveModified & modifiedFilter
-        const obj = {
-          abs,
-          stats: g.statCache[abs],
-          mtime: g.statCache[abs].mtime,
+    const files = g.filter(abs => {
+      // put as an object for use in saveModified & modifiedFilter
+      const obj = {
+        abs,
+        stats: lstatSync(abs),
+        mtime: lstatSync(abs).mtime,
+      }
+
+      // use filter if we have it
+      if (filter !== null) {
+        if (filter(abs, obj) !== true) {
+          return false
         }
+      }
 
-        // filter
-        if (lastModifiedFilter(obj) === false) return false
+      // filter
+      if (lastModifiedFilter(obj) === false) return false
 
-        // save it to the cache
-        saveModified(obj)
+      // save it to the cache
+      saveModified(obj)
 
-        return abs
-      })
+      return abs
+    })
 
     // seemingly if you use glob readDirSync twice
     // it mutates the original array o.o
@@ -148,56 +152,69 @@ class DLL extends ChainedMap {
   }
 
   /**
-   * dependencies, devDependencies
+   * @desc filter with callback when available
+   *       default to bundledDependencies when they exist
+   *       fallback to dependencies
+   *       dependencies, devDependencies, allDependencies
    * @param {Function<Array<?string>, Array<?string>> | Array<string>} [filter=null]
-   * @return {DLL}
+   * @return {DLL} @chainable
    */
   pkgDeps(filter = null) {
-    const pkgPath = this.get('pkg')
-    const pkg = require(pkgPath)
+    // if set as a path, use it, otherwise, require it
+    let pkg = this.get('pkg')
+    log.yellow('pkgPath:').data(pkg).echo(this.get('debug'))
 
-    const deps = Object.keys(pkg.dependencies || {})
-    const dev = Object.keys(pkg.devDependencies || {})
-    let all = deps
-
-    if (filter !== null) {
-      if (typeof filter === 'function') {
-        all = filter(deps, dev, deps.concat(dev))
-      }
-      else if (Array.isArray(filter)) {
-        all = filter
-      }
+    if (typeof pkg === 'string' && pkg.includes('/') && exists(pkg)) {
+      pkg = require(pkg)
+      log.yellow('pkg:').data(pkg).echo(this.get('debug'))
     }
 
-    return this.deps(all)
+    // gather deps
+    const bundled = Object.keys(pkg.bundledDependencies || {})
+    const deps = Object.keys(pkg.dependencies || {})
+    const dev = Object.keys(pkg.devDependencies || {})
+    const all = deps.concat(dev).concat(bundled)
+    let depsToUse = bundled
+
+    // use filter when available
+    if (filter !== null) {
+      if (typeof filter === 'function') {
+        depsToUse = filter(deps, dev, all)
+      } else if (Array.isArray(filter)) {
+        depsToUse = filter
+      }
+    } else if (!depsToUse.length) {
+      // otherwise, if no bundled, fallback to deps
+      depsToUse = deps
+    }
+
+    // use it when we have it
+    if (depsToUse && depsToUse.length) {
+      return this.deps(depsToUse)
+    }
+
+    // if no deps, ignore
+    return this
   }
 
   // --- dev/cache/debug ---
 
   /**
-   * clears the cache
+   * @desc clears the cache
    * @see flipfile/del
-   * @return {DLL}
+   * @return {DLL} @chainable
    */
   clearCache() {
     const fs = require('flipfile/extra')
-    const {removeSync} = fs
+    const { removeSync } = fs
 
     removeSync(resolve(this.get('dir'), './.fliphub'))
     return this
   }
 
   /**
-   * @param  {boolean} [should=true]
-   * @return {DLL}
-   */
-  debug(should = true) {
-    return this.set('debug', !!should)
-  }
-
-  /**
    * @param  {Array<string>} files file paths to bust cache on
-   * @return {DLL}
+   * @return {DLL} @chainable
    */
   cacheBustingFiles(files) {
     return this.set('cacheBustingFiles', files)
@@ -205,7 +222,7 @@ class DLL extends ChainedMap {
 
   /**
    * @param  {Object} ago
-   * @return {DLL}
+   * @return {DLL} @chainable
    */
   lastModifiedFilter(ago) {
     return this.set('lastModifiedFilter', lastModified(ago))
@@ -214,14 +231,15 @@ class DLL extends ChainedMap {
   /**
    * @private
    *
-   * maps entries to manifest json
-   * saves in cache file
+   * @desc maps entries to manifest json
+   *       saves in cache file
+   *       @modifies this.manifests
    *
    * @see DLL.dllRefPlugins, DLL.dllPlugins, flipcache
-   * @return {DLL}
+   * @return {DLL} @chainable
    */
   saveManifests() {
-    const {output, dir} = this.entries()
+    const { output, dir } = this.entries()
 
     // by ref
     const cacheManifests = cache.get('manifests')
@@ -252,8 +270,24 @@ class DLL extends ChainedMap {
   // --- data ---
 
   /**
-   * @param  {string} dir
-   * @return {DLL}
+   * @since 0.1.0
+   * @desc   use filename, to resolve paths to dir, and
+   * @example dll.filename(__filename)
+   * @param  {string} filename absolute path, __filename
+   * @return {DLL} @chainable
+   */
+  filename(filename) {
+    return this.dir(dirname(filename)).set('filename', filename)
+  }
+
+  /**
+   * @TODO should cache bust on pkg if it does not already
+   *
+   * @desc sets up resolved paths
+   *       @modifies this.pkg
+   *       @modifies this.cacheBustingFiles
+   * @param  {string} dir directory to resolve paths to
+   * @return {DLL} @chainable
    */
   dir(dir) {
     // paths
@@ -263,9 +297,8 @@ class DLL extends ChainedMap {
     const webpackConfig = resolve(dir, './webpack.config.js')
 
     // store pkg path and dir
-    this
-      .set('pkg', pkgPath)
-      .set('dir', dir)
+    this.set('dir', dir)
+    if (this.has('pkg') === false) this.set('pkg', pkgPath)
 
     // only setup cache once
     if (cache !== null && cache !== undefined) return this
@@ -277,7 +310,7 @@ class DLL extends ChainedMap {
       .setIfNotEmpty('manifests', [])
       .setIfNotEmpty('modifiedLog', {})
       .setIfNotEmpty('builds', [])
-      // .setIfNotEmpty('lastBuilt', Date.now())
+      .setIfNotEmpty('lastBuilt', Date.now())
 
     let busts = [require.main.filename, this.get('pkg')]
     if (exists(webpackConfig)) {
@@ -290,22 +323,27 @@ class DLL extends ChainedMap {
     log
       .emoji('cache')
       .blue('cacheBustingFiles:')
-      .data({busts})
+      .data({ busts })
       .echo(this.get('debug'))
 
-    hashcache = flipcache
-      .hashCache(cachefile)
-      .debug(this.get('debug'))
-      .hash(dir)
-      .bustOnChange(busts)
-      .setContent(cache.toString())
+    try {
+      hashcache = flipcache
+        .hashCache(cachefile)
+        .debug(this.get('debug'))
+        .hash(dir)
+        .bustOnChange(busts)
+        .setContent(cache.toString())
+    } catch (e) {
+      log.error(e).echo()
+    }
 
     return this
   }
 
   /**
-   * @param  {string} output
-   * @return {DLL}
+   * @desc override the output path in the webpack config
+   * @param  {string} output absolute path
+   * @return {DLL} @chainable
    */
   output(output) {
     if (isRel(output)) output = resolve(output)
@@ -314,17 +352,17 @@ class DLL extends ChainedMap {
 
   /**
    * @see DLL.ensureSetup, DLL.appConfig, DLL.dllConfig, DLL.output
-   * @param  {Object} c
-   * @return {DLL}
+   * @param  {Object} webpackConfig
+   * @return {DLL} @chainable
    */
-  config(c) {
+  config(webpackConfig) {
     this.ensureSetup()
 
     // set original
-    this.set('appConfig', c)
+    this.set('appConfig', webpackConfig)
 
     // deref
-    const config = Object.assign({}, {}, c)
+    const config = Object.assign({}, {}, webpackConfig)
     config.entry = Object.assign({}, {}, config.entry)
     config.output = Object.assign({}, {}, config.output)
 
@@ -352,7 +390,6 @@ class DLL extends ChainedMap {
       config.output.libraryTarget = 'commonjs2'
     }
 
-
     // set it
     this.set('dllConfig', config)
 
@@ -362,7 +399,7 @@ class DLL extends ChainedMap {
   // --- statics ---
 
   /**
-   * @description for multiple configs
+   * @desc for multiple configs
    * @param  {Array<Object>} configs
    * @param  {function} cb
    * @return {Array<Object>}
@@ -373,7 +410,7 @@ class DLL extends ChainedMap {
   }
 
   /**
-   * @description for easy auto mode
+   * @desc for easy auto mode
    * @param  {Object} config
    * @param  {string} [dir=process.cwd()]
    * @return {Array<Object>}
@@ -387,46 +424,56 @@ class DLL extends ChainedMap {
       .toConfig()
   }
 
-
   // --- webpack config ---
-
 
   /**
    * @private
    * @return {Object<vendor, internal>}
    */
   entry() {
-    const {deps, files} = this.entries()
+    const { deps, files } = this.entries()
 
-    log
-      .data(files)
-      .green('entry files')
-      .echo(this.get('debug'))
+    log.data({ files, deps }).green('entry files, deps').echo(this.get('debug'))
 
-    return {
+    const entry = {
       vendor: deps,
       internal: files,
     }
+
+    if (entry.vendor.length === 0) delete entry.vendor
+    if (entry.internal.length === 0) delete entry.internal
+
+    if (Object.keys(entry).length === 0) {
+      log.red('had no entries sorry eh').echo() // this.get('debug')
+
+      this.set('og', true)
+      return false
+    }
+
+    return entry
   }
 
   /**
+   * @tutorial https://webpack.js.org/plugins/dll-plugin/#dllreferenceplugin
+   * @desc creates an array of DLLReferencePlugins
    * @return {Array<DLLReferencePlugin>}
    */
   dllRefPlugins() {
-    const plugins = this.get('manifests').map(file => {
-      if (exists(file) === false) return undefined
-      const args = {
-        context: this.get('context'),
-        manifest: require(file),
-      }
+    const plugins = this.get('manifests')
+      .map(file => {
+        if (exists(file) === false) return undefined
+        const args = {
+          context: this.get('context'),
+          manifest: require(file),
+        }
 
-      if (this.get('node') === true) {
-        args.sourceType = 'commonsjs2'
-      }
+        if (this.get('node') === true) {
+          args.sourceType = 'commonsjs2'
+        }
 
-      return new DllReferencePlugin(args)
-    })
-    .filter(plugin => plugin !== undefined)
+        return new DllReferencePlugin(args)
+      })
+      .filter(plugin => plugin !== undefined)
 
     if (plugins.length === 0) {
       log
@@ -439,6 +486,8 @@ class DLL extends ChainedMap {
   }
 
   /**
+   * @tutorial https://webpack.js.org/plugins/dll-plugin/#dllplugin
+   * @see dllReferencePlugins
    * @return {Array<DLLPlugin>}
    */
   dllPlugins() {
@@ -453,15 +502,14 @@ class DLL extends ChainedMap {
       name: '[name]_dll_lib',
     }
 
-    return [
-      new DllPlugin(args),
-    ]
+    return [new DllPlugin(args)]
   }
 
   // --- analysis/determining/metadata ---
 
   /**
-   * @return {DLL}
+   * @desc defaults the dir to pwd
+   * @return {DLL} @chainable
    */
   ensureSetup() {
     if (this.has('dir') === false) {
@@ -477,7 +525,7 @@ class DLL extends ChainedMap {
    * decorate should call this... like in top todos
    * should be triggered by both configs
    *
-   * @return {DLL}
+   * @return {DLL} @chainable
    */
   build() {
     const build = {}
@@ -492,6 +540,10 @@ class DLL extends ChainedMap {
 
   /**
    * @private
+   * @desc
+   *  - checks cache.shouldbeused
+   *  - checks staleTime
+   *  - checks whether it is built
    * @return {boolean}
    */
   shouldBuildDLL() {
@@ -501,10 +553,7 @@ class DLL extends ChainedMap {
     const everyX = this.get('everyX')
     const builds = cache.get('builds')
 
-    log
-      .yellow('builds.length')
-      .verbose(builds.length)
-      .echo(this.get('debug'))
+    log.yellow('builds.length').verbose(builds.length).echo(this.get('debug'))
 
     // if we have no builds, build the first one
     if (builds.length === 0) {
@@ -514,13 +563,20 @@ class DLL extends ChainedMap {
 
     const index = builds.length - 1
     const last = builds[index]
-    const {time, dll} = last
+    const { time, dll } = last
 
-    const canBeUsed = hashcache.canBeUsed()
+    let canBeUsed = false
+    try {
+      canBeUsed = hashcache.canBeUsed()
+    } catch (e) {
+      // ignoring for now
+      log.data(e).red('error').echo(false)
+      canBeUsed = true
+    }
 
     log
       .yellow('second - hash')
-      .verbose({index, last, canBeUsed})
+      .verbose({ index, last, canBeUsed })
       .echo(this.get('debug'))
 
     // require files changed etc
@@ -538,7 +594,7 @@ class DLL extends ChainedMap {
 
       log
         .yellow('third - everyX')
-        .verbose({dllInLastBuilds, everyX, minus: -everyX})
+        .verbose({ dllInLastBuilds, everyX, minus: -everyX })
         .echo(this.get('debug'))
 
       if (dllInLastBuilds === false) {
@@ -549,7 +605,7 @@ class DLL extends ChainedMap {
 
     log
       .yellow('fourth - diffs')
-      .verbose({staleTime, time, tillNow: tillNowSatisfies(time, staleTime)})
+      .verbose({ staleTime, time, tillNow: tillNowSatisfies(time, staleTime) })
       .echo(this.get('debug'))
 
     // check time diffs
@@ -562,7 +618,7 @@ class DLL extends ChainedMap {
 
     log
       .yellow('fifth - manifests exist')
-      .verbose({manifestFilesExist})
+      .verbose({ manifestFilesExist })
       .echo(this.get('debug'))
 
     if (manifestFilesExist === false) {
@@ -577,8 +633,8 @@ class DLL extends ChainedMap {
   }
 
   /**
-   * optionally adds dll config
-   * adds appConfig
+   * @desc optionally adds dll config
+   *       adds appConfig
    *
    * @see DLL.saveManifests
    * @see DLL.shouldBuildDLL
@@ -588,10 +644,8 @@ class DLL extends ChainedMap {
    * @return {Array<WebpackConfigObject>}
    */
   toConfig() {
-    if (this.get('og') === true) {
-      log
-        .yellow('og mode: returning original config')
-        .echo(this.get('debug'))
+    if (this.get('og') === true || this.entry() === false) {
+      log.yellow('og mode: returning original config').echo(this.get('debug'))
 
       return [this.get('appConfig')]
     }
@@ -603,20 +657,13 @@ class DLL extends ChainedMap {
 
     const shouldBuildDLL = this.shouldBuildDLL()
 
-    log
-      .green('shouldBuildDLL:')
-      .data(shouldBuildDLL)
-      .echo(this.get('debug'))
+    log.green('shouldBuildDLL:').data(shouldBuildDLL).echo(this.get('debug'))
 
     if (shouldBuildDLL) configs.push(this.dllConfig())
     configs.push(this.appConfig())
 
     const ms = timer.stop('dll').msTook('dll')
-    log
-      .emoji('timer')
-      .bold('d-l-l took: ' + ms + 'ms')
-      .echo()
-
+    log.emoji('timer').bold('d-l-l took: ' + ms + 'ms').echo()
 
     return configs
   }
@@ -625,11 +672,12 @@ class DLL extends ChainedMap {
 
   /**
    * @private
+   * @desc original webpack config, ensures there are plugins
    * @see DLL.config, DLL.dllRefPlugins, DLL.dllConfig
    * @return {WebpackConfigObject}
    */
   appConfig() {
-    const config = deepmerge(this.get('appConfig'), {
+    const config = dopemerge(this.get('appConfig'), {
       plugins: [],
     })
 
@@ -642,11 +690,13 @@ class DLL extends ChainedMap {
    * @NOTE seemingly there is an issue deepmerging these object
    *       plugin arrays if plugins is a single object in both
    *
+   * @desc used when exporting two configs,
+   *       this config is for building the dll bundle
    * @see DLL.entry, DLL.dllPlugins, DLL.config
    * @return {WebpackConfigObject}
    */
   dllConfig() {
-    const config = deepmerge(this.get('dllConfig'), {
+    const config = dopemerge(this.get('dllConfig'), {
       entry: this.entry(),
       plugins: [],
     })
@@ -657,9 +707,8 @@ class DLL extends ChainedMap {
   }
 
   /**
-   * https://github.com/webpack/docs/wiki/list-of-plugins#using-dlls-via-nodejs
-   *
-   * because dll references don't get required properly on node
+   * @see https://github.com/webpack/docs/wiki/list-of-plugins#using-dlls-via-nodejs
+   * @desc because dll references don't get required properly on node
    * @return {string} path to generated output
    */
   nodeEntry() {
@@ -671,11 +720,9 @@ class DLL extends ChainedMap {
     const files = cache
       .get('manifests')
       .map(manifest =>
-        manifest
-          .replace('-manifest', '.dll')
-          .replace('.json', '.js'))
-      .concat(glob.sync(outputGlob, {absolute: true}))
-      // .concat(globfs().readdirSync(outputGlob, {}))
+        manifest.replace('-manifest', '.dll').replace('.json', '.js')
+      )
+      .concat(glob.sync(outputGlob, { absolute: true }))
 
     const content = files
       .filter(file => !file.includes('node-entry'))
@@ -683,7 +730,8 @@ class DLL extends ChainedMap {
       .map(file => {
         const name = basename(file, '.js').replace('.dll', '_dll_lib')
         return `global["${name}"] = require("${file}")\n`
-      }).join('')
+      })
+      .join('')
 
     const nodeEntry = resolve(output, './node-entry.js')
 
